@@ -473,6 +473,7 @@ export class Typewriter3D {
     const { texture } = createPaperCanvasTexture(text, 1024, 1024, showCursor);
     this.paperTexture.image = texture.image;
     this.paperTexture.needsUpdate = true;
+    texture.dispose();
   }
 
   // Set Hovered Key for Micro Displacement Feedback

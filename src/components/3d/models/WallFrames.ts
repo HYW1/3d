@@ -107,7 +107,9 @@ export class WallFrames3D {
 
   public updateArtStyle(style: 'fuji' | 'kanji' | 'botanical' | 'minimalist') {
     const tex = createWallArtTexture(style);
+    const previousTexture = this.frameArtMaterial.map;
     this.frameArtMaterial.map = tex;
     this.frameArtMaterial.needsUpdate = true;
+    previousTexture?.dispose();
   }
 }

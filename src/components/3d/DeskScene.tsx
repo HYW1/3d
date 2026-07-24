@@ -15,8 +15,10 @@ interface DeskSceneProps {
   state: DeskState;
   onUpdateState: (updater: (prev: DeskState) => DeskState) => void;
   onTypewriterCharTyped?: (char: string) => void;
-  scrollOffset?: number;
 }
+
+const TOUCH_LONG_PRESS_DELAY_MS = 450;
+const TOUCH_MOVE_TOLERANCE_PX = 8;
 
 // Camera Presets dictionary - Camera target raised to frame typewriter paper and typed text perfectly
 const CAMERA_PRESETS: Record<CameraPreset, { pos: THREE.Vector3; lookAt: THREE.Vector3 }> = {
@@ -42,19 +44,12 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
   state,
   onUpdateState,
   onTypewriterCharTyped,
-  scrollOffset = 0,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-
-  // Keep track of scroll offset in ref for frame-perfect 60fps render loop parallax
-  const scrollOffsetRef = useRef(scrollOffset);
-  useEffect(() => {
-    scrollOffsetRef.current = scrollOffset;
-  }, [scrollOffset]);
 
   // 3D Object references
   const typewriterRef = useRef<Typewriter3D | null>(null);
@@ -139,6 +134,73 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     controls.target.copy(CAMERA_PRESETS[state.activeCameraPreset].lookAt);
     controlsRef.current = controls;
 
+    type TouchGesture = {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      moved: boolean;
+      activated: boolean;
+      timerId: number;
+    };
+
+    let touchGesture: TouchGesture | null = null;
+
+    const handleTouchPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || touchGesture) return;
+
+      const gesture: TouchGesture = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+        activated: false,
+        timerId: 0,
+      };
+      touchGesture = gesture;
+
+      // OrbitControls has already recorded this pointer. Pause it until the
+      // touch remains still long enough to be an intentional model gesture.
+      controls.enabled = false;
+      gesture.timerId = window.setTimeout(() => {
+        if (touchGesture !== gesture || gesture.moved) return;
+
+        gesture.activated = true;
+        controls.enabled = true;
+        renderer.domElement.style.touchAction = 'none';
+        navigator.vibrate?.(20);
+      }, TOUCH_LONG_PRESS_DELAY_MS);
+    };
+
+    const handleTouchPointerMove = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || touchGesture?.pointerId !== event.pointerId) return;
+
+      const distance = Math.hypot(
+        event.clientX - touchGesture.startX,
+        event.clientY - touchGesture.startY,
+      );
+
+      if (!touchGesture.activated && distance > TOUCH_MOVE_TOLERANCE_PX) {
+        touchGesture.moved = true;
+        window.clearTimeout(touchGesture.timerId);
+      } else if (touchGesture.activated) {
+        event.preventDefault();
+      }
+    };
+
+    const finishTouchGesture = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || touchGesture?.pointerId !== event.pointerId) return;
+
+      window.clearTimeout(touchGesture.timerId);
+      touchGesture = null;
+      controls.enabled = true;
+      renderer.domElement.style.touchAction = 'pan-y pinch-zoom';
+    };
+
+    renderer.domElement.addEventListener('pointerdown', handleTouchPointerDown);
+    renderer.domElement.addEventListener('pointermove', handleTouchPointerMove, { passive: false });
+    renderer.domElement.addEventListener('pointerup', finishTouchGesture);
+    renderer.domElement.addEventListener('pointercancel', finishTouchGesture);
+
     // 2. LIGHTS SETUP
     // Soft Warm Ambient Light for Japanese Raw Wood Diffuse Atmosphere
     const ambientLight = new THREE.AmbientLight(0xfff4e6, 0.78);
@@ -205,18 +267,11 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
       animationFrameId = requestAnimationFrame(animate);
       const elapsedTime = clock.getElapsedTime();
 
-      // Smooth camera transition with scroll parallax focusing onto paper
+      // Smooth camera preset transitions. Page scrolling does not move the
+      // scene camera; touch rotation is activated separately by long press.
       if (cameraRef.current && controlsRef.current) {
-        const scrollFactor = Math.min(Math.max((scrollOffsetRef.current || 0) / 450, 0), 1);
-        const parallaxPos = targetCamPos.current.clone();
-        parallaxPos.y += scrollFactor * 0.18; // Move camera higher as user scrolls down
-        parallaxPos.z -= scrollFactor * 0.32; // Move camera closer to typewriter paper
-
-        const parallaxLookAt = targetLookAt.current.clone();
-        parallaxLookAt.y += scrollFactor * 0.22; // LookAt shifts directly onto typed paper
-
-        cameraRef.current.position.lerp(parallaxPos, 0.08);
-        controlsRef.current.target.lerp(parallaxLookAt, 0.08);
+        cameraRef.current.position.lerp(targetCamPos.current, 0.08);
+        controlsRef.current.target.lerp(targetLookAt.current, 0.08);
         controlsRef.current.update();
       }
 
@@ -305,6 +360,11 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
+      if (touchGesture) window.clearTimeout(touchGesture.timerId);
+      renderer.domElement.removeEventListener('pointerdown', handleTouchPointerDown);
+      renderer.domElement.removeEventListener('pointermove', handleTouchPointerMove);
+      renderer.domElement.removeEventListener('pointerup', finishTouchGesture);
+      renderer.domElement.removeEventListener('pointercancel', finishTouchGesture);
       renderer.domElement.removeEventListener('wheel', preservePageWheel, { capture: true });
       controls.dispose();
       if (rendererRef.current && rendererRef.current.domElement) {

@@ -119,6 +119,10 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
+    // Keep wheel and vertical touch gestures available for navigating the page.
+    // Horizontal touch drags can still rotate the scene.
+    controls.enableZoom = false;
+    renderer.domElement.style.touchAction = 'pan-y pinch-zoom';
     controls.maxPolarAngle = Math.PI / 2.05; // Keep camera above table level
     controls.minDistance = 1.5;
     controls.maxDistance = 8.5;
@@ -291,6 +295,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
+      controls.dispose();
       if (rendererRef.current && rendererRef.current.domElement) {
         rendererRef.current.domElement.remove();
       }

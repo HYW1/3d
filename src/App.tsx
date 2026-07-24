@@ -52,7 +52,6 @@ export default function App() {
         deskState={deskState}
         onUpdateState={setDeskState}
         onOpenCustomizer={() => setIsCustomizerOpen(true)}
-        onOpenInfo={() => setIsInfoOpen(true)}
       />
 
       {/* 1. Hero / Cover Section (#hero) with embedded 3D Typewriter Scene */}

@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { DeskWoodStyle } from '../../../types';
-import { createWoodTexture } from '../../../utils/textureGenerator';
+import { createWoodTexture, createWallPlasterTexture } from '../../../utils/textureGenerator';
 
 export class DeskAndWall3D {
   public group: THREE.Group;
   public deskMesh: THREE.Mesh;
   private deskMaterial: THREE.MeshStandardMaterial;
+  private floorMaterial: THREE.MeshStandardMaterial;
 
   constructor(woodStyle: DeskWoodStyle = 'natural_oak') {
     this.group = new THREE.Group();
@@ -69,8 +70,10 @@ export class DeskAndWall3D {
 
     // 2. BACK WALL (Warm Plaster / Sand Mortar Wall)
     const wallGeo = new THREE.PlaneGeometry(16, 12);
+    const wallTex = createWallPlasterTexture();
     const wallMat = new THREE.MeshStandardMaterial({
-      color: 0x4D535A, // Neutral dark blue-grey tint matching the moody quiet reference image background
+      map: wallTex,
+      color: 0x4D535A,
       roughness: 0.9,
       metalness: 0.0,
     });
@@ -92,6 +95,7 @@ export class DeskAndWall3D {
       roughness: 0.6,
       metalness: 0.05,
     });
+    this.floorMaterial = floorMat;
     const floorMesh = new THREE.Mesh(floorGeo, floorMat);
     floorMesh.rotation.x = -Math.PI / 2;
     floorMesh.position.set(0, -2.2, 2.0);
@@ -100,8 +104,16 @@ export class DeskAndWall3D {
   }
 
   public updateWoodStyle(style: DeskWoodStyle) {
+    const previousDeskTexture = this.deskMaterial.map;
+    const previousFloorTexture = this.floorMaterial.map;
     const tex = createWoodTexture(style);
     this.deskMaterial.map = tex;
+    this.floorMaterial.map = tex;
     this.deskMaterial.needsUpdate = true;
+    this.floorMaterial.needsUpdate = true;
+    previousDeskTexture?.dispose();
+    if (previousFloorTexture && previousFloorTexture !== previousDeskTexture) {
+      previousFloorTexture.dispose();
+    }
   }
 }

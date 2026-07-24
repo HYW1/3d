@@ -16,7 +16,7 @@ export class Succulent3D {
     });
 
     // Main Tapered Pot Body
-    const potGeo = new THREE.CylinderGeometry(0.22, 0.16, 0.32, 32);
+    const potGeo = new THREE.CylinderGeometry(0.22, 0.16, 0.32, 20);
     const potMesh = new THREE.Mesh(potGeo, potMat);
     potMesh.position.set(0, 0.16, 0);
     potMesh.castShadow = true;
@@ -24,7 +24,7 @@ export class Succulent3D {
     this.group.add(potMesh);
 
     // Rounded Ceramic Top Rim Lip (Smooth Bevel - 倒圆角)
-    const topRimGeo = new THREE.TorusGeometry(0.22, 0.024, 16, 32);
+    const topRimGeo = new THREE.TorusGeometry(0.22, 0.024, 12, 20);
     const topRimMesh = new THREE.Mesh(topRimGeo, potMat);
     topRimMesh.rotation.x = Math.PI / 2;
     topRimMesh.position.set(0, 0.32, 0);
@@ -32,14 +32,14 @@ export class Succulent3D {
     this.group.add(topRimMesh);
 
     // Rounded Ceramic Base Ring (Smooth Bevel - 倒圆角)
-    const baseRingGeo = new THREE.TorusGeometry(0.16, 0.018, 16, 32);
+    const baseRingGeo = new THREE.TorusGeometry(0.16, 0.018, 12, 20);
     const baseRingMesh = new THREE.Mesh(baseRingGeo, potMat);
     baseRingMesh.rotation.x = Math.PI / 2;
     baseRingMesh.position.set(0, 0.018, 0);
     this.group.add(baseRingMesh);
 
     // 2. SOIL & RIVER PEBBLE STONES
-    const soilGeo = new THREE.CylinderGeometry(0.21, 0.21, 0.04, 32);
+    const soilGeo = new THREE.CylinderGeometry(0.21, 0.21, 0.04, 20);
     const soilMat = new THREE.MeshStandardMaterial({
       color: 0x2e2118, // Rich dark organic soil
       roughness: 0.95,
@@ -100,7 +100,7 @@ export class Succulent3D {
       const leafNode = new THREE.Group();
 
       // Plump Leaf Body using scaled smooth sphere (gives smooth rounded edges & organic taper)
-      const bodyGeo = new THREE.SphereGeometry(1, 24, 24);
+      const bodyGeo = new THREE.SphereGeometry(1, 12, 12);
       const bodyMesh = new THREE.Mesh(bodyGeo, mat);
       bodyMesh.scale.set(width, height, length);
       bodyMesh.position.set(0, height * 0.5, length * 0.5);
@@ -109,10 +109,11 @@ export class Succulent3D {
       leafNode.add(bodyMesh);
 
       // Blushed Pink Leaf Tip (Small rounded cap at tip of leaf)
-      const tipGeo = new THREE.SphereGeometry(width * 0.45, 16, 16);
+      const tipGeo = new THREE.SphereGeometry(width * 0.45, 8, 8);
       const tipMesh = new THREE.Mesh(tipGeo, tipBlushMat);
       tipMesh.position.set(0, height * 0.5, length * 0.95);
       tipMesh.scale.set(1.0, 0.8, 1.2);
+      tipMesh.castShadow = false;
       leafNode.add(tipMesh);
 
       return leafNode;

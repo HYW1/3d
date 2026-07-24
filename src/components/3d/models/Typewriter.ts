@@ -45,8 +45,10 @@ export class Typewriter3D {
 
   constructor(
     typewriterColor: TypewriterColor = 'dusty_teal',
-    paperText: string = 'Design is thinking\nmade visual.'
+    paperText: string = 'Design is thinking\nmade visual.',
+    paperFontSize = 36,
   ) {
+    this.paperFontSize = paperFontSize;
     this.group = new THREE.Group();
     this.group.name = 'typewriter';
 
@@ -243,7 +245,7 @@ export class Typewriter3D {
 
     const keyRadius = 0.056;
     const keyCapHeight = 0.040;
-    const keyGeo = new THREE.CylinderGeometry(keyRadius, keyRadius * 0.92, keyCapHeight, 24);
+    const keyGeo = new THREE.CylinderGeometry(keyRadius, keyRadius * 0.92, keyCapHeight, 16);
     const ringGeo = new THREE.CylinderGeometry(keyRadius * 1.05, keyRadius * 1.05, keyCapHeight * 0.5, 24);
 
     // Strictly uniform horizontal and row-to-row vertical spacing
@@ -293,6 +295,7 @@ export class Typewriter3D {
         // Chrome ring trim
         const ringMesh = new THREE.Mesh(ringGeo, chromeMaterial);
         ringMesh.position.y = -0.01;
+        ringMesh.castShadow = false;
         ringMesh.userData = { isKey: true, keyChar: isRed ? ' ' : char };
         singleKeyGroup.add(ringMesh);
 
@@ -300,6 +303,7 @@ export class Typewriter3D {
         const stemGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.12, 8);
         const stemMesh = new THREE.Mesh(stemGeo, chromeMaterial);
         stemMesh.position.set(0, -0.06, 0);
+        stemMesh.castShadow = false;
         stemMesh.userData = { isKey: true, keyChar: isRed ? ' ' : char };
         singleKeyGroup.add(stemMesh);
 
@@ -426,7 +430,7 @@ export class Typewriter3D {
     // 6. TYPEWRITER PAPER SHEET (Perfectly inserted in platen mechanism)
     const paperWidth = 1.50;
     const paperHeight = 1.80;
-    const paperGeo = new THREE.PlaneGeometry(paperWidth, paperHeight, 24, 24);
+    const paperGeo = new THREE.PlaneGeometry(paperWidth, paperHeight, 12, 12);
 
     // Curve bottom of paper smoothly around platen roller cylinder
     const pos = paperGeo.attributes.position;
@@ -440,7 +444,7 @@ export class Typewriter3D {
     }
     paperGeo.computeVertexNormals();
 
-    const { texture: pTex } = createPaperCanvasTexture(paperText);
+    const { texture: pTex } = createPaperCanvasTexture(paperText, 1024, 1024, false, paperFontSize);
     this.paperTexture = pTex;
 
     const paperMat = new THREE.MeshStandardMaterial({
@@ -465,14 +469,17 @@ export class Typewriter3D {
 
   private currentHoverKeyChar: string | null = null;
 
+  private paperFontSize = 36;
+
   public setTypewriterColor(color: TypewriterColor) {
     this.bodyMaterial.color.setStyle(this.colorMap[color]);
   }
 
-  public updatePaperText(text: string, showCursor = false) {
-    const { texture } = createPaperCanvasTexture(text, 1024, 1024, showCursor);
+  public updatePaperText(text: string, showCursor = false, fontSize = this.paperFontSize) {
+    const { texture } = createPaperCanvasTexture(text, 1024, 1024, showCursor, fontSize);
     this.paperTexture.image = texture.image;
     this.paperTexture.needsUpdate = true;
+    this.paperFontSize = fontSize;
   }
 
   // Set Hovered Key for Micro Displacement Feedback
@@ -501,17 +508,25 @@ export class Typewriter3D {
   }
 
   // Smooth Per-Frame Animation Update
-  public update() {
+  public update(): boolean {
+    let animating = false;
     // Smoothly lerp key positions towards targetY for tactile spring feel
     this.keysMap.forEach((keyGroup) => {
       if (keyGroup.userData.targetY !== undefined && !keyGroup.userData.isPressing) {
+        const beforeY = keyGroup.position.y;
         keyGroup.position.y = THREE.MathUtils.lerp(
           keyGroup.position.y,
           keyGroup.userData.targetY,
           0.25
         );
+        if (Math.abs(keyGroup.position.y - keyGroup.userData.targetY) > 0.0005) {
+          animating = true;
+        } else if (beforeY !== keyGroup.position.y) {
+          animating = true;
+        }
       }
     });
+    return animating;
   }
 
   // Trigger Key Press Down Animation

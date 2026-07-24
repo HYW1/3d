@@ -5,6 +5,21 @@ import { DeskWoodStyle } from '../types';
  * Procedural Canvas Texture Generator for realistic Materials
  */
 
+export function configureTexture(
+  texture: THREE.CanvasTexture,
+  maxAnisotropy = 4,
+  repeat?: [number, number],
+): THREE.CanvasTexture {
+  texture.anisotropy = maxAnisotropy;
+  if (repeat) {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(repeat[0], repeat[1]);
+  }
+  texture.needsUpdate = true;
+  return texture;
+}
+
 // 1. Procedural Wood Grain Texture
 export function createWoodTexture(style: DeskWoodStyle = 'natural_oak'): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -77,12 +92,26 @@ export function createWoodTexture(style: DeskWoodStyle = 'natural_oak'): THREE.C
   }
   ctx.putImageData(imgData, 0, 0);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  texture.needsUpdate = true;
-  return texture;
+  return configureTexture(new THREE.CanvasTexture(canvas), 4, [2, 2]);
+}
+
+export function createWallPlasterTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#4D535A';
+  ctx.fillRect(0, 0, 512, 512);
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+  for (let i = 0; i < 5000; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    ctx.fillRect(x, y, 1.2, 1.2);
+  }
+
+  return configureTexture(new THREE.CanvasTexture(canvas), 4, [2, 2]);
 }
 
 // 2. Procedural Paper Texture with Dynamic Typewriter Text
@@ -90,7 +119,8 @@ export function createPaperCanvasTexture(
   text: string,
   width = 1024,
   height = 1024,
-  showCursor = false
+  showCursor = false,
+  fontSize = 36,
 ): { texture: THREE.CanvasTexture; canvas: HTMLCanvasElement } {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -116,12 +146,13 @@ export function createPaperCanvasTexture(
 
   // Typewriter Text Rendering
   ctx.fillStyle = '#222224'; // Vintage typewriter ribbon ink black/dark charcoal
-  ctx.font = '36px "Courier New", Courier, monospace';
+  ctx.font = `${fontSize}px "Courier New", Courier, monospace`;
   ctx.textBaseline = 'top';
 
   const startX = 80;
   const startY = 120;
-  const lineHeight = 54;
+  const lineHeight = Math.round(fontSize * 1.5);
+  const charWidth = Math.round(fontSize * 0.61);
   const maxLineWidth = width - 160;
 
   const lines = text.split('\n');
@@ -138,7 +169,7 @@ export function createPaperCanvasTexture(
 
       if (metrics.width > maxLineWidth && i > 0) {
         // Draw current line with subtle organic typewriter ink offset
-        drawTypewriterLine(ctx, currentLineText, startX, currentY);
+        drawTypewriterLine(ctx, currentLineText, startX, currentY, charWidth);
         currentY += lineHeight;
         currentLineText = words[i];
       } else {
@@ -147,7 +178,7 @@ export function createPaperCanvasTexture(
     }
 
     if (currentLineText) {
-      drawTypewriterLine(ctx, currentLineText, startX, currentY);
+      drawTypewriterLine(ctx, currentLineText, startX, currentY, charWidth);
       currentY += lineHeight;
     }
   });
@@ -155,12 +186,10 @@ export function createPaperCanvasTexture(
   // Optional blinking cursor indicator
   if (showCursor) {
     ctx.fillStyle = '#D9534F'; // Soft red ribbon mark
-    ctx.fillRect(startX + (lines[lines.length - 1]?.length || 0) * 22, currentY - lineHeight + 8, 14, 32);
+    ctx.fillRect(startX + (lines[lines.length - 1]?.length || 0) * charWidth, currentY - lineHeight + 8, 14, 32);
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return { texture, canvas };
+  return { texture: configureTexture(new THREE.CanvasTexture(canvas), 4), canvas };
 }
 
 // Helper to draw realistic typewriter text with ink texture and slight micro-offsets
@@ -168,21 +197,22 @@ function drawTypewriterLine(
   ctx: CanvasRenderingContext2D,
   text: string,
   x: number,
-  y: number
+  y: number,
+  charWidth: number,
 ) {
   let charX = x;
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     // Organic mechanical imperfections
     const offsetY = (Math.sin(i * 3.7) * 0.8) + (Math.random() - 0.5) * 0.6;
-    const alpha = 0.85 + Math.random() * 0.15; // Varying ribbon ink intensity
+    const alpha = 0.85 + (Math.sin(i * 1.7) + 1) * 0.075;
 
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.fillText(char, charX, y + offsetY);
     ctx.restore();
 
-    charX += 22; // Fixed pitch character width
+    charX += charWidth;
   }
 }
 
@@ -314,9 +344,7 @@ export function createWallArtTexture(style: 'fuji' | 'kanji' | 'botanical' | 'mi
     ctx.fill();
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
+  return configureTexture(new THREE.CanvasTexture(canvas), 4);
 }
 
 // 4. Corkboard Bulletin Texture
@@ -340,10 +368,5 @@ export function createCorkboardTexture(): THREE.CanvasTexture {
     ctx.fill();
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(1, 1);
-  texture.needsUpdate = true;
-  return texture;
+  return configureTexture(new THREE.CanvasTexture(canvas), 4, [1, 1]);
 }

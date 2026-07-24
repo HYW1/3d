@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { DeskState, CameraPreset } from '../../types';
@@ -46,6 +46,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
   onTypewriterCharTyped,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [webglError, setWebglError] = useState(false);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
@@ -89,8 +90,8 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
+    const width = Math.max(containerRef.current.clientWidth, 1);
+    const height = Math.max(containerRef.current.clientHeight, 1);
 
     // Scene
     const scene = new THREE.Scene();
@@ -103,7 +104,18 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     cameraRef.current = camera;
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        powerPreference: 'high-performance',
+      });
+    } catch (error) {
+      console.error('WebGL renderer initialization failed', error);
+      setWebglError(true);
+      return;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, width / height < 1 ? 1.25 : 2));
     renderer.shadowMap.enabled = true;
@@ -305,6 +317,8 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
+      if (document.hidden) return;
+
       let frameDirty = needsRender || performance.now() < renderUntil;
       needsRender = false;
 
@@ -425,11 +439,25 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
       renderer.domElement.removeEventListener('pointercancel', finishTouchGesture);
       renderer.domElement.removeEventListener('wheel', preservePageWheel, { capture: true });
       controls.dispose();
+      scene.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => {
+          Object.values(material).forEach((value) => {
+            if (value instanceof THREE.Texture) value.dispose();
+          });
+          material.dispose();
+        });
+      });
       renderer.dispose();
+      renderer.forceContextLoss();
+      renderer.domElement.remove();
       requestRenderRef.current = null;
-      if (rendererRef.current && rendererRef.current.domElement) {
-        rendererRef.current.domElement.remove();
-      }
+      sceneRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
+      rendererRef.current = null;
     };
   }, []);
 
@@ -557,7 +585,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
 
       if (pressedKeyChar !== null) {
         // Individual 3D Key Clicked!
-        soundManager.playTypewriterKey();
+        if (state.typewriterSoundEnabled) soundManager.playTypewriterKey();
         typewriterRef.current?.animateKeyPress(pressedKeyChar);
         onUpdateState((prev) => ({
           ...prev,
@@ -684,7 +712,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
       }
 
       if (e.key === 'Backspace') {
-        soundManager.playTypewriterKey(1);
+        if (state.typewriterSoundEnabled) soundManager.playTypewriterKey(1);
         typewriterRef.current?.animateKeyPress('RED');
         onUpdateState((prev) => ({
           ...prev,
@@ -692,7 +720,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
           keystrokeCount: prev.keystrokeCount + 1,
         }));
       } else if (e.key === 'Enter') {
-        soundManager.playCarriageBell();
+        if (state.typewriterSoundEnabled) soundManager.playCarriageBell();
         typewriterRef.current?.animateKeyPress('RED');
         onUpdateState((prev) => ({
           ...prev,
@@ -700,7 +728,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
           keystrokeCount: prev.keystrokeCount + 1,
         }));
       } else if (e.key === ' ') {
-        soundManager.playSpacebar();
+        if (state.typewriterSoundEnabled) soundManager.playSpacebar();
         typewriterRef.current?.animateKeyPress('SPACE');
         onUpdateState((prev) => ({
           ...prev,
@@ -708,7 +736,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
           keystrokeCount: prev.keystrokeCount + 1,
         }));
       } else if (e.key.length === 1) {
-        soundManager.playTypewriterKey(e.key.charCodeAt(0));
+        if (state.typewriterSoundEnabled) soundManager.playTypewriterKey(e.key.charCodeAt(0));
         typewriterRef.current?.animateKeyPress(e.key);
         onUpdateState((prev) => ({
           ...prev,
@@ -721,7 +749,18 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onUpdateState, onTypewriterCharTyped]);
+  }, [onUpdateState, onTypewriterCharTyped, state.typewriterSoundEnabled]);
+
+  if (webglError) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-stone-900 px-6 text-center text-stone-300">
+        <div>
+          <p className="font-semibold text-stone-100">无法加载 3D 场景</p>
+          <p className="mt-2 text-sm">请启用浏览器硬件加速或使用支持 WebGL 的现代浏览器。</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

@@ -90,13 +90,12 @@ export class DeskAndWall3D {
 
     // 3. OAK WOOD FLOOR BELOW DESK
     const floorGeo = new THREE.PlaneGeometry(16, 10);
-    const floorMat = new THREE.MeshStandardMaterial({
+    this.floorMaterial = new THREE.MeshStandardMaterial({
       map: woodTex,
       roughness: 0.6,
       metalness: 0.05,
     });
-    this.floorMaterial = floorMat;
-    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    const floorMesh = new THREE.Mesh(floorGeo, this.floorMaterial);
     floorMesh.rotation.x = -Math.PI / 2;
     floorMesh.position.set(0, -2.2, 2.0);
     floorMesh.receiveShadow = true;

@@ -37,7 +37,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   const sceneOpacity = scrollProgress < 0.65 ? 1 : Math.max(1 - (scrollProgress - 0.65) / 0.35, 0);
 
   return (
-    <section ref={containerRef} id="hero" className="relative w-full pt-0 bg-stone-950 overflow-hidden min-h-[85vh]">
+    <section ref={containerRef} id="hero" className="relative w-full pt-14 bg-stone-950 overflow-hidden min-h-[85vh]">
       {/* Background Glow Accent with Smooth Radial Gradient */}
       <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-gradient-to-tr from-teal-500/15 via-amber-500/10 to-transparent blur-[120px] pointer-events-none rounded-full" />
 

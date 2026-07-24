@@ -115,6 +115,16 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
+    // OrbitControls registers a non-passive wheel listener on its DOM element.
+    // Stop that listener without cancelling the browser's native page scroll.
+    const preservePageWheel = (event: WheelEvent) => {
+      event.stopImmediatePropagation();
+    };
+    renderer.domElement.addEventListener('wheel', preservePageWheel, {
+      capture: true,
+      passive: true,
+    });
+
     // Orbit Controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -295,6 +305,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
+      renderer.domElement.removeEventListener('wheel', preservePageWheel, { capture: true });
       controls.dispose();
       if (rendererRef.current && rendererRef.current.domElement) {
         rendererRef.current.domElement.remove();

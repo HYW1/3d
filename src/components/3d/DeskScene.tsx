@@ -545,6 +545,9 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
 
   // Hover Handler for Key Displacement and Cursor State Feedback
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Touch movement is reserved for page scrolling or an armed long-press
+    // camera gesture; touch devices do not have a meaningful hover state.
+    if (event.pointerType === 'touch') return;
     if (!sceneRef.current || !cameraRef.current || !containerRef.current) return;
 
     const rect = containerRef.current.getBoundingClientRect();

@@ -319,81 +319,85 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
       animationFrameId = requestAnimationFrame(animate);
       if (document.hidden) return;
 
-      let frameDirty = needsRender || performance.now() < renderUntil;
-      needsRender = false;
+      try {
+        let frameDirty = needsRender || performance.now() < renderUntil;
+        needsRender = false;
 
-      // Smooth camera preset transitions. Page scrolling does not move the
-      // scene camera; touch rotation is activated separately by long press.
-      if (cameraRef.current && controlsRef.current) {
-        const camBefore = cameraRef.current.position.clone();
-        const targetBefore = controlsRef.current.target.clone();
+        // Smooth camera preset transitions. Page scrolling does not move the
+        // scene camera; touch rotation is activated separately by long press.
+        if (cameraRef.current && controlsRef.current) {
+          const camBefore = cameraRef.current.position.clone();
+          const targetBefore = controlsRef.current.target.clone();
 
-        cameraRef.current.position.lerp(targetCamPos.current, 0.08);
-        controlsRef.current.target.lerp(targetLookAt.current, 0.08);
-        controlsRef.current.update();
+          cameraRef.current.position.lerp(targetCamPos.current, 0.08);
+          controlsRef.current.target.lerp(targetLookAt.current, 0.08);
+          controlsRef.current.update();
 
-        if (
-          camBefore.distanceToSquared(cameraRef.current.position) > 1e-8 ||
-          targetBefore.distanceToSquared(controlsRef.current.target) > 1e-8
-        ) {
+          if (
+            camBefore.distanceToSquared(cameraRef.current.position) > 1e-8 ||
+            targetBefore.distanceToSquared(controlsRef.current.target) > 1e-8
+          ) {
+            frameDirty = true;
+          }
+        }
+
+        // Smooth lighting mode lerp transitions
+        const lerpSpeed = 0.04;
+        if (ambientLightRef.current) {
+          ambientLightRef.current.color.lerp(targetAmbientColor.current, lerpSpeed);
+          ambientLightRef.current.intensity = THREE.MathUtils.lerp(
+            ambientLightRef.current.intensity,
+            targetAmbientIntensity.current,
+            lerpSpeed
+          );
+        }
+        if (dirLightRef.current) {
+          dirLightRef.current.color.lerp(targetDirColor.current, lerpSpeed);
+          dirLightRef.current.intensity = THREE.MathUtils.lerp(
+            dirLightRef.current.intensity,
+            targetDirIntensity.current,
+            lerpSpeed
+          );
+        }
+        if (windowFillLightRef.current) {
+          windowFillLightRef.current.color.lerp(targetWindowColor.current, lerpSpeed);
+          windowFillLightRef.current.intensity = THREE.MathUtils.lerp(
+            windowFillLightRef.current.intensity,
+            targetWindowIntensity.current,
+            lerpSpeed
+          );
+        }
+        if (woodBouncePointLightRef.current) {
+          woodBouncePointLightRef.current.color.lerp(targetBounceColor.current, lerpSpeed);
+          woodBouncePointLightRef.current.intensity = THREE.MathUtils.lerp(
+            woodBouncePointLightRef.current.intensity,
+            targetBounceIntensity.current,
+            lerpSpeed
+          );
+        }
+
+        if (typewriterRef.current?.update()) {
           frameDirty = true;
         }
-      }
 
-      // Smooth lighting mode lerp transitions
-      const lerpSpeed = 0.04;
-      if (ambientLightRef.current) {
-        ambientLightRef.current.color.lerp(targetAmbientColor.current, lerpSpeed);
-        ambientLightRef.current.intensity = THREE.MathUtils.lerp(
-          ambientLightRef.current.intensity,
-          targetAmbientIntensity.current,
-          lerpSpeed
-        );
-      }
-      if (dirLightRef.current) {
-        dirLightRef.current.color.lerp(targetDirColor.current, lerpSpeed);
-        dirLightRef.current.intensity = THREE.MathUtils.lerp(
-          dirLightRef.current.intensity,
-          targetDirIntensity.current,
-          lerpSpeed
-        );
-      }
-      if (windowFillLightRef.current) {
-        windowFillLightRef.current.color.lerp(targetWindowColor.current, lerpSpeed);
-        windowFillLightRef.current.intensity = THREE.MathUtils.lerp(
-          windowFillLightRef.current.intensity,
-          targetWindowIntensity.current,
-          lerpSpeed
-        );
-      }
-      if (woodBouncePointLightRef.current) {
-        woodBouncePointLightRef.current.color.lerp(targetBounceColor.current, lerpSpeed);
-        woodBouncePointLightRef.current.intensity = THREE.MathUtils.lerp(
-          woodBouncePointLightRef.current.intensity,
-          targetBounceIntensity.current,
-          lerpSpeed
-        );
-      }
+        if (sceneRef.current && sceneRef.current.background instanceof THREE.Color) {
+          const bgBefore = sceneRef.current.background.clone();
+          sceneRef.current.background.lerp(targetBgColor.current, lerpSpeed);
+          if (colorDistance(bgBefore, sceneRef.current.background) > 0.001) {
+            frameDirty = true;
+          }
+        }
 
-      if (typewriterRef.current?.update()) {
-        frameDirty = true;
-      }
-
-      if (sceneRef.current && sceneRef.current.background instanceof THREE.Color) {
-        const bgBefore = sceneRef.current.background.clone();
-        sceneRef.current.background.lerp(targetBgColor.current, lerpSpeed);
-        if (bgBefore.distanceToSquared(sceneRef.current.background) > 1e-8) {
+        if (isLightingTransitioning()) {
           frameDirty = true;
         }
-      }
 
-      if (isLightingTransitioning()) {
-        frameDirty = true;
-      }
-
-      // Render only when the scene is actually changing.
-      if (frameDirty && rendererRef.current && sceneRef.current && cameraRef.current) {
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
+        // Render only when the scene is actually changing.
+        if (frameDirty && rendererRef.current && sceneRef.current && cameraRef.current) {
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+        }
+      } catch (error) {
+        console.error('3D scene animation frame failed', error);
       }
     };
 
@@ -451,7 +455,6 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
         });
       });
       renderer.dispose();
-      renderer.forceContextLoss();
       renderer.domElement.remove();
       requestRenderRef.current = null;
       sceneRef.current = null;

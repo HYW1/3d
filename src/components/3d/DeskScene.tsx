@@ -15,8 +15,10 @@ interface DeskSceneProps {
   state: DeskState;
   onUpdateState: (updater: (prev: DeskState) => DeskState) => void;
   onTypewriterCharTyped?: (char: string) => void;
-  scrollOffset?: number;
 }
+
+const TOUCH_LONG_PRESS_DELAY_MS = 450;
+const TOUCH_MOVE_TOLERANCE_PX = 8;
 
 // Camera Presets dictionary - Camera target raised to frame typewriter paper and typed text perfectly
 const CAMERA_PRESETS: Record<CameraPreset, { pos: THREE.Vector3; lookAt: THREE.Vector3 }> = {
@@ -42,19 +44,16 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
   state,
   onUpdateState,
   onTypewriterCharTyped,
-  scrollOffset = 0,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-
-  // Keep track of scroll offset in ref for frame-perfect 60fps render loop parallax
-  const scrollOffsetRef = useRef(scrollOffset);
-  useEffect(() => {
-    scrollOffsetRef.current = scrollOffset;
-  }, [scrollOffset]);
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const pointerRef = useRef(new THREE.Vector2());
+  const hoverThrottleRef = useRef(0);
+  const requestRenderRef = useRef<((durationMs?: number) => void) | null>(null);
 
   // 3D Object references
   const typewriterRef = useRef<Typewriter3D | null>(null);
@@ -106,7 +105,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, width / height < 1 ? 1.25 : 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -139,6 +138,73 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     controls.target.copy(CAMERA_PRESETS[state.activeCameraPreset].lookAt);
     controlsRef.current = controls;
 
+    type TouchGesture = {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      moved: boolean;
+      activated: boolean;
+      timerId: number;
+    };
+
+    let touchGesture: TouchGesture | null = null;
+
+    const handleTouchPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || touchGesture) return;
+
+      const gesture: TouchGesture = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+        activated: false,
+        timerId: 0,
+      };
+      touchGesture = gesture;
+
+      // OrbitControls has already recorded this pointer. Pause it until the
+      // touch remains still long enough to be an intentional model gesture.
+      controls.enabled = false;
+      gesture.timerId = window.setTimeout(() => {
+        if (touchGesture !== gesture || gesture.moved) return;
+
+        gesture.activated = true;
+        controls.enabled = true;
+        renderer.domElement.style.touchAction = 'none';
+        navigator.vibrate?.(20);
+      }, TOUCH_LONG_PRESS_DELAY_MS);
+    };
+
+    const handleTouchPointerMove = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || touchGesture?.pointerId !== event.pointerId) return;
+
+      const distance = Math.hypot(
+        event.clientX - touchGesture.startX,
+        event.clientY - touchGesture.startY,
+      );
+
+      if (!touchGesture.activated && distance > TOUCH_MOVE_TOLERANCE_PX) {
+        touchGesture.moved = true;
+        window.clearTimeout(touchGesture.timerId);
+      } else if (touchGesture.activated) {
+        event.preventDefault();
+      }
+    };
+
+    const finishTouchGesture = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || touchGesture?.pointerId !== event.pointerId) return;
+
+      window.clearTimeout(touchGesture.timerId);
+      touchGesture = null;
+      controls.enabled = true;
+      renderer.domElement.style.touchAction = 'pan-y pinch-zoom';
+    };
+
+    renderer.domElement.addEventListener('pointerdown', handleTouchPointerDown);
+    renderer.domElement.addEventListener('pointermove', handleTouchPointerMove, { passive: false });
+    renderer.domElement.addEventListener('pointerup', finishTouchGesture);
+    renderer.domElement.addEventListener('pointercancel', finishTouchGesture);
+
     // 2. LIGHTS SETUP
     // Soft Warm Ambient Light for Japanese Raw Wood Diffuse Atmosphere
     const ambientLight = new THREE.AmbientLight(0xfff4e6, 0.78);
@@ -152,6 +218,14 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     dirLight.shadow.mapSize.width = 1024;
     dirLight.shadow.mapSize.height = 1024;
     dirLight.shadow.bias = 0.0001;
+    dirLight.shadow.normalBias = 0.02;
+    dirLight.shadow.camera.left = -5;
+    dirLight.shadow.camera.right = 5;
+    dirLight.shadow.camera.top = 5;
+    dirLight.shadow.camera.bottom = -1;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 15;
+    dirLight.shadow.camera.updateProjectionMatrix();
     scene.add(dirLight);
     dirLightRef.current = dirLight;
 
@@ -173,7 +247,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     scene.add(deskAndWall.group);
     deskAndWallRef.current = deskAndWall;
 
-    const typewriter = new Typewriter3D(state.typewriterColor, state.paperText);
+    const typewriter = new Typewriter3D(state.typewriterColor, state.paperText, state.paperFontSize);
     scene.add(typewriter.group);
     typewriterRef.current = typewriter;
 
@@ -199,29 +273,58 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
 
     // 4. ANIMATION LOOP
     let animationFrameId: number;
-    const clock = new THREE.Clock();
+    let needsRender = true;
+    let renderUntil = 0;
+
+    const requestRender = (durationMs = 0) => {
+      needsRender = true;
+      if (durationMs > 0) {
+        renderUntil = Math.max(renderUntil, performance.now() + durationMs);
+      }
+    };
+    requestRenderRef.current = requestRender;
+
+    const colorDistance = (left: THREE.Color, right: THREE.Color) =>
+      Math.abs(left.r - right.r) + Math.abs(left.g - right.g) + Math.abs(left.b - right.b);
+
+    const isLightingTransitioning = () => {
+      const bg = sceneRef.current?.background;
+      const bgColor = bg instanceof THREE.Color ? bg : null;
+      return Boolean(
+        (ambientLightRef.current && colorDistance(ambientLightRef.current.color, targetAmbientColor.current) > 0.001) ||
+        Math.abs((ambientLightRef.current?.intensity ?? 0) - targetAmbientIntensity.current) > 0.001 ||
+        (dirLightRef.current && colorDistance(dirLightRef.current.color, targetDirColor.current) > 0.001) ||
+        Math.abs((dirLightRef.current?.intensity ?? 0) - targetDirIntensity.current) > 0.001 ||
+        (windowFillLightRef.current && colorDistance(windowFillLightRef.current.color, targetWindowColor.current) > 0.001) ||
+        Math.abs((windowFillLightRef.current?.intensity ?? 0) - targetWindowIntensity.current) > 0.001 ||
+        (woodBouncePointLightRef.current && colorDistance(woodBouncePointLightRef.current.color, targetBounceColor.current) > 0.001) ||
+        Math.abs((woodBouncePointLightRef.current?.intensity ?? 0) - targetBounceIntensity.current) > 0.001 ||
+        (bgColor && colorDistance(bgColor, targetBgColor.current) > 0.001),
+      );
+    };
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
-      const elapsedTime = clock.getElapsedTime();
+      let frameDirty = needsRender || performance.now() < renderUntil;
+      needsRender = false;
 
-      // Smooth camera transition with scroll parallax focusing onto paper
+      // Smooth camera preset transitions. Page scrolling does not move the
+      // scene camera; touch rotation is activated separately by long press.
       if (cameraRef.current && controlsRef.current) {
-        const scrollFactor = Math.min(Math.max((scrollOffsetRef.current || 0) / 450, 0), 1);
-        const parallaxPos = targetCamPos.current.clone();
-        parallaxPos.y += scrollFactor * 0.18; // Move camera higher as user scrolls down
-        parallaxPos.z -= scrollFactor * 0.32; // Move camera closer to typewriter paper
+        const camBefore = cameraRef.current.position.clone();
+        const targetBefore = controlsRef.current.target.clone();
 
-        const parallaxLookAt = targetLookAt.current.clone();
-        parallaxLookAt.y += scrollFactor * 0.22; // LookAt shifts directly onto typed paper
-
-        cameraRef.current.position.lerp(parallaxPos, 0.08);
-        controlsRef.current.target.lerp(parallaxLookAt, 0.08);
+        cameraRef.current.position.lerp(targetCamPos.current, 0.08);
+        controlsRef.current.target.lerp(targetLookAt.current, 0.08);
         controlsRef.current.update();
-      }
 
-      // Gentle subtle breathing movement on plant leaves (Disabled rotation to keep succulent stable)
-      // Succulent is fixed on desk surface without continuous rotation
+        if (
+          camBefore.distanceToSquared(cameraRef.current.position) > 1e-8 ||
+          targetBefore.distanceToSquared(controlsRef.current.target) > 1e-8
+        ) {
+          frameDirty = true;
+        }
+      }
 
       // Smooth lighting mode lerp transitions
       const lerpSpeed = 0.04;
@@ -258,21 +361,29 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
         );
       }
 
-      // Smooth typewriter keys tactile hover lerp animation
-      if (typewriterRef.current) {
-        typewriterRef.current.update();
+      if (typewriterRef.current?.update()) {
+        frameDirty = true;
       }
 
       if (sceneRef.current && sceneRef.current.background instanceof THREE.Color) {
+        const bgBefore = sceneRef.current.background.clone();
         sceneRef.current.background.lerp(targetBgColor.current, lerpSpeed);
+        if (bgBefore.distanceToSquared(sceneRef.current.background) > 1e-8) {
+          frameDirty = true;
+        }
       }
 
-      // Render
-      if (rendererRef.current && sceneRef.current && cameraRef.current) {
+      if (isLightingTransitioning()) {
+        frameDirty = true;
+      }
+
+      // Render only when the scene is actually changing.
+      if (frameDirty && rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
     };
 
+    requestRender();
     animate();
 
     // Resize Observer & Aspect Ratio Adaptive FOV
@@ -294,7 +405,9 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
       }
 
       cameraRef.current.updateProjectionMatrix();
+      rendererRef.current.setPixelRatio(Math.min(window.devicePixelRatio, aspect < 1 ? 1.25 : 2));
       rendererRef.current.setSize(w, h);
+      requestRender();
     };
 
     handleResize(); // Initial sizing check
@@ -305,8 +418,15 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
+      if (touchGesture) window.clearTimeout(touchGesture.timerId);
+      renderer.domElement.removeEventListener('pointerdown', handleTouchPointerDown);
+      renderer.domElement.removeEventListener('pointermove', handleTouchPointerMove);
+      renderer.domElement.removeEventListener('pointerup', finishTouchGesture);
+      renderer.domElement.removeEventListener('pointercancel', finishTouchGesture);
       renderer.domElement.removeEventListener('wheel', preservePageWheel, { capture: true });
       controls.dispose();
+      renderer.dispose();
+      requestRenderRef.current = null;
       if (rendererRef.current && rendererRef.current.domElement) {
         rendererRef.current.domElement.remove();
       }
@@ -358,23 +478,30 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     }
 
     lampRef.current?.setLampState(state.lampOn, state.lampIntensity, state.lampColor);
+    requestRenderRef.current?.(300);
   }, [state.lightingMode, state.lampOn, state.lampIntensity, state.lampColor]);
 
   // 6. UPDATE MATERIAL STYLES WHEN STATE CHANGES
   useEffect(() => {
     if (deskAndWallRef.current) deskAndWallRef.current.updateWoodStyle(state.woodStyle);
+    requestRenderRef.current?.();
   }, [state.woodStyle]);
 
   useEffect(() => {
     if (typewriterRef.current) typewriterRef.current.setTypewriterColor(state.typewriterColor);
+    requestRenderRef.current?.();
   }, [state.typewriterColor]);
 
   useEffect(() => {
-    if (typewriterRef.current) typewriterRef.current.updatePaperText(state.paperText);
-  }, [state.paperText]);
+    if (typewriterRef.current) {
+      typewriterRef.current.updatePaperText(state.paperText, false, state.paperFontSize);
+    }
+    requestRenderRef.current?.(120);
+  }, [state.paperText, state.paperFontSize]);
 
   useEffect(() => {
     if (wallFramesRef.current) wallFramesRef.current.updateArtStyle(state.wallArtStyle);
+    requestRenderRef.current?.();
   }, [state.wallArtStyle]);
 
   // 7. CAMERA PRESET TRANSITION
@@ -397,6 +524,7 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
       }
       targetCamPos.current.copy(pos);
       targetLookAt.current.copy(preset.lookAt);
+      requestRenderRef.current?.(600);
     }
   }, [state.activeCameraPreset]);
 
@@ -404,12 +532,14 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!sceneRef.current || !cameraRef.current || !containerRef.current) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    requestRenderRef.current?.(180);
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(x, y), cameraRef.current);
+    const rect = containerRef.current.getBoundingClientRect();
+    pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const raycaster = raycasterRef.current;
+    raycaster.setFromCamera(pointerRef.current, cameraRef.current);
 
     const intersects = raycaster.intersectObjects(sceneRef.current.children, true);
 
@@ -485,14 +615,21 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
 
   // Hover Handler for Key Displacement and Cursor State Feedback
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Touch movement is reserved for page scrolling or an armed long-press
+    // camera gesture; touch devices do not have a meaningful hover state.
+    if (event.pointerType === 'touch') return;
     if (!sceneRef.current || !cameraRef.current || !containerRef.current) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    const now = performance.now();
+    if (now - hoverThrottleRef.current < 50) return;
+    hoverThrottleRef.current = now;
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(x, y), cameraRef.current);
+    const rect = containerRef.current.getBoundingClientRect();
+    pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const raycaster = raycasterRef.current;
+    raycaster.setFromCamera(pointerRef.current, cameraRef.current);
 
     const intersects = raycaster.intersectObjects(sceneRef.current.children, true);
 
@@ -526,6 +663,8 @@ export const DeskScene: React.FC<DeskSceneProps> = ({
     if (containerRef.current) {
       containerRef.current.style.cursor = isInteractiveHover ? 'pointer' : 'grab';
     }
+
+    requestRenderRef.current?.(120);
   };
 
   const handlePointerLeave = () => {

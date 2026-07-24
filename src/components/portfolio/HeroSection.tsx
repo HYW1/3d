@@ -49,7 +49,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
           opacity: sceneOpacity,
         }}
       >
-        <DeskScene state={deskState} onUpdateState={onUpdateState} scrollOffset={currentScrollY} />
+        <DeskScene state={deskState} onUpdateState={onUpdateState} />
 
         {/* Subtle Bottom Edge Blend */}
         <div className="absolute bottom-0 inset-x-0 h-16 bg-gradient-to-t from-stone-950/90 to-transparent pointer-events-none z-10" />
